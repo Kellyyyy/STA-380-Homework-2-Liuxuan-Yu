@@ -1,0 +1,269 @@
+---
+title: "STA 380 Homework 2"
+author: "Liuxuan Yu"
+date: "August 14, 2016"
+output: word_document
+---
+#Flights at ABIA
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(Hmisc)
+
+setwd("C:\\Users\\Administrator\\Desktop\\R script in class")
+rm(list=ls())
+ABIA<-read.csv('ABIA.csv',header=T,sep=',')
+attach(ABIA)
+
+plot(ABIA$DepTime,ABIA$DepDelay)
+```
+Take plane at morning will decrease the randomness of being delayed
+```{r}
+plot(ABIA$DayofMonth,ABIA$DepDelay)
+plot(ABIA$DayOfWeek,ABIA$DepDelay)
+
+depart=ABIA[,c(1:22)]
+depart<-depart[complete.cases(depart),]
+
+qplot(depart$DayofMonth, depart$ArrDelay,color=depart$DayOfWeek)
+qplot(depart$DayofMonth, depart$DepDelay,color=depart$DayOfWeek)
+```
+It seems that day of month won't influnece a lot on the delay time.
+```{r}
+#look at the delay of different flight company
+qplot(depart$DepDelay,depart$ArrDelay,color=depart$UniqueCarrier)
+describe(depart$UniqueCarrier)
+plot(depart$UniqueCarrier,depart$DepDelay)
+```
+AA and WN contains about half of all the flights in Austin.but AA's delay was not that big as for example B6.
+
+
+```{r}
+#what is the best time of the year to minimize delay
+plot((depart$DayofMonth+depart$Month*30),depart$ArrDelay)
+```
+It looks like the days about 260-300 would be better, which is the days about October,and the days in December are very easy to delay, which may have a relationship with Christmas.
+
+```{r}
+describe(DayOfWeek) 
+boxplot(ABIA$ArrDelay~ABIA$DayOfWeek,outline=FALSE,xlab='day of week',ylab='arrive delay time',col = "lightgray")
+boxplot(ABIA$DepDelay~ABIA$DayOfWeek,outline=FALSE,xlab='day of week',ylab='departure delay time')
+```
+
+With almost same number of data, Friday shows a little bit higher than other weekdays for the arrive delay and departure delay time. Weekends and Wednesday  would be lower in both time and time range.
+
+#Author attribution
+```{r}
+setwd("C:\\Users\\Administrator\\Desktop\\R script in class")
+rm(list=ls())
+library(tm)
+library(plyr)
+
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), 
+            id=fname, language='en') }
+
+## Rolling two directories together into a single corpus
+author_dirs = Sys.glob('ReutersC50/C50train/*')
+author_dirs = author_dirs[1:50]
+file_list = NULL
+labels = NULL
+for(author in author_dirs) {
+  author_name = substring(author, first=21)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list = append(file_list, files_to_add)
+  labels = append(labels, rep(author_name, length(files_to_add)))
+}
+
+# Need a more clever regex to get better names here
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+
+# Preprocessing
+my_corpus = tm_map(my_corpus, content_transformer(tolower)) # make everything lowercase
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers)) # remove numbers
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation)) # remove punctuation
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) ## remove excess white-space
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM = DocumentTermMatrix(my_corpus)
+DTM = removeSparseTerms(DTM, 0.95)
+DTM
+
+# Now a dense matrix
+X_train = as.matrix(DTM)
+```
+
+For test data,just read it in the same way as the train data, but later I will delete the author name in the test data.
+```{r}
+author_dirs = Sys.glob('ReutersC50/C50test/*')
+file_list = NULL
+labels_test = NULL
+author_test =NULL
+for(author in author_dirs) {
+  author_name = substring(author, first=20)
+  author_test = append(author_test,author_name)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list = append(file_list, files_to_add)
+  labels_test = append(labels_test, rep(author_name, length(files_to_add)))
+}
+
+# Need a more clever regex to get better names here
+all_docs = lapply(file_list, readerPlain) 
+names(all_docs) = file_list
+names(all_docs) = sub('.txt', '', names(all_docs))
+
+my_corpus = Corpus(VectorSource(all_docs))
+names(my_corpus) = file_list
+
+# Preprocessing
+my_corpus = tm_map(my_corpus, content_transformer(tolower))
+my_corpus = tm_map(my_corpus, content_transformer(removeNumbers))
+my_corpus = tm_map(my_corpus, content_transformer(removePunctuation))
+my_corpus = tm_map(my_corpus, content_transformer(stripWhitespace)) 
+my_corpus = tm_map(my_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+DTM = DocumentTermMatrix(my_corpus)
+DTM = removeSparseTerms(DTM, 0.95)
+X_test = as.matrix(DTM)
+
+#delete author name in test data
+row.names(X_test)<-c(1:2500)
+
+#fill in the different data between train and test data set
+bind_matrix=rbind.fill.matrix(X_train,X_test)
+bind_matrix[is.na(bind_matrix)] <- 0
+train=bind_matrix[1:2500,]
+test=bind_matrix[2501:5000,]
+row.names(train)<-row.names(X_train)
+train<-train[,order(colnames(train))]
+test<-test[,order(colnames(test))]
+```
+
+**Method 1:**
+calculate the angle between every test and train vectors, choose the smallest angle of every pairs, and use the train name as the test predictor.
+```{r}
+predict=NULL
+for (j in c(1:2500)){
+  cat("Validation",j,"of",2500,"\n")
+  list=NULL
+  for (i in c(2501:5000)){
+    a=bind_matrix[i,]
+    b=bind_matrix[j,]
+    theta <- cos(sum(a*b)/(sqrt(sum(a*a))*sqrt(sum(b*b))))
+    list=append(list,theta)
+    }
+  predict=append(predict,row.names(train)[which.max(list)])
+  }
+#predict
+
+author_name = substring(predict, first=20)
+author_name= regmatches(author_name, regexpr('.+/',author_name))
+true_name=regmatches(row.names(train), regexpr('.+/',row.names(train)))
+true_name= substring(true_name, first=20)[1:10]
+summary(true_name==author_name)
+```
+
+The result shows that within the 2500 test data, there are 649 true prediction, 1851 wrong prediction, which means that the accuracy of this model is about 25.96%
+
+**Method 2:**
+Naive Bayes: compare each product of test and train vector to get the maximum log probabilities
+```{r}
+smooth_count = 1/nrow(train)
+w_AP = rowsum(train + smooth_count,labels)
+w_AP= w_AP/sum(w_AP)
+w_train = log(w_AP)
+
+DTM_test = DocumentTermMatrix(my_corpus,list(dictionary=colnames(DTM)))
+X_test = as.matrix(DTM_test)
+
+predict = NULL
+for (i in 1:50) {
+  cat("Validation",i,"of",50,"\n")
+  max= -(Inf)
+  list = NULL
+  for (j in 1:50) {
+    alpha=sum(X_test[i,]*w_train[j,])
+    if(alpha > max) {
+      max = alpha
+      list = rownames(w_train)[j]}
+  }
+  predict = append(predict, list)
+}
+predict_results = table(labels_test,predict)
+```
+Let's take a look at the authors whose articles are most difficult to guess.
+```{r}
+correct = NULL
+for (i in range(dim(predict_results)[1])){
+correct = append(correct, predict_results[i, i])
+}
+pred_correct = data.frame(author_test, correct)
+pred_correct<- pred_correct[order(-correct),] 
+pred_correct$correct_rate <- pred_correct$correct/50
+
+pred_correct
+sum(pred_correct$correct)/nrow(X_test)
+```
+By using this model, the accuracy rate even reach to 60%,which is much better than the first one.
+
+From the result, we can find that, the LynnleyBrowning is the most easy one to predict, the TanEeLyn is the difficult one to predict.
+
+#Practice with association rule mining
+This question is about the association rule mining.Use the data on grocery purchases to find some interesting association rules for these shopping baskets. 
+Reading the grocery purchases data by using "scan",we try to use the lift, confidence and support to explain the correlation between those items.
+
+```{r}
+library(arules)
+library(plyr)
+setwd("C:\\Users\\Administrator\\Desktop\\R script in class")
+rm(list=ls())
+#read the data into R with "scan"
+groceries<-scan("groceries.txt",what="character",sep = "\n",quiet=TRUE)
+
+
+#First split each row of data into a list of lots of stuffs
+grocery_split<- strsplit(groceries, ",")
+head(grocery_split)
+
+#Remove duplicates ("de-dupe")
+grocery_split<- lapply(grocery_split, unique)
+
+#Cast this variable as a special arules "transactions" class.
+grocery<- as(grocery_split, "transactions")
+```
+
+**Then we run the 'apriori' algorithm.**
+The support value of {X} with respect to the total database is the proportion of transactions in the database which contains the item-set {X} 
+The confidence value of {X} to {Y} measures how item Y appears in baskets that contains X.
+The lift is supp(X&Y) divided by supp(X)*supp(Y)
+
+Let's look at rules with support > .01 & confidence >.5  to find out the frequent itemsets. The support number is very small because in the data set, the biggest support is only 0.02
+```{r}
+rules <- apriori(grocery, parameter=list(support=.01, confidence=.5))
+
+# Look at the output
+inspect(rules)
+
+#Choose a subset
+inspect(subset(rules, subset=lift > 2))
+```
+We explore some big lift number which lift is > 2, from the result we know that those X and Y are might dependent on one another,which might be useful for predicting the consequent in future data sets.
+For example, whole milk are always highly correlated with yogurt, other vegetables are also correlated with root vegetables and tropical fruit.
+
+```{r}
+inspect(subset(rules, subset=confidence > 0.5))
+```
+The biggest confidence are still below 0.6, but a lot of them are above 0.5. For those with 0.5 confidence, it means that for the transactions that contains X(lhs), only about 50% that they also contain Y(rhs). So the correlation was not that strong.
+
+```{r}
+# get a higher support threshold
+inspect(subset(rules, subset=support > .015 & confidence > 0.5))
+```
+Now the right hand side only have whole milk, and the yogurt shows a lot, which might show that the yogurt has a high correlation with whole milk.
